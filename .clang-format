@@ -1,0 +1,4 @@
+# 参考: [Clang-Formatの書式について](https://qiita.com/koyukitukimino/items/9b8f74d1ae307a7017d3)
+
+BasedOnStyle: Google
+ReflowComments: false

@@ -1,0 +1,10 @@
+{
+  "cmake.ignoreCMakeListsMissing": true,
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
+  "files.trimFinalNewlines": true,
+  "python.analysis.extraPaths": [],
+  "clangd.arguments": [
+    "--compile-commands-dir=${workspaceFolder}/build"
+  ],
+}
