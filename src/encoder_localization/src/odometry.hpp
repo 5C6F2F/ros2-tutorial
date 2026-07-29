@@ -6,7 +6,7 @@
 #include "geometry_msgs/msg/pose_with_covariance.hpp"
 #include "geometry_msgs/msg/twist_with_covariance.hpp"
 #include "tf2/LinearMath/Quaternion.hpp"
-#include "units.hpp"
+#include "wheel_config.hpp"
 
 using PoseWithCovariance = geometry_msgs::msg::PoseWithCovariance;
 using TwistWithCovariance = geometry_msgs::msg::TwistWithCovariance;
@@ -16,7 +16,8 @@ class Odometry {
   static_assert(N > 2, "N must be greater than 2.");
 
  public:
-  Odometry(std::array<WheelConfig, N>& wheel_configs, int encoder_resolution)
+  Odometry(const std::array<WheelConfig, N>& wheel_configs,
+           int encoder_resolution)
       : encoder_resolution_(encoder_resolution) {
     wheel_matrix_inv_ = get_wheel_matrix_inv(wheel_configs);
     last_encoder_counts_.fill(0);
@@ -81,9 +82,9 @@ class Odometry {
 
       matrix(i, 0) = cos(theta.value());
       matrix(i, 1) = sin(theta.value());
-      matrix(i, 2) = (x.value() * matrix(i, 1) - y.value() * matrix(i, 0));
+      matrix(i, 2) = x.value() * matrix(i, 1) - y.value() * matrix(i, 0);
 
-      double wheel_circumference = 2 * M_PI * radius.value();
+      double wheel_circumference = 2. * M_PI * radius.value();
       matrix.row(i) /= wheel_circumference;
     }
 
@@ -111,10 +112,10 @@ class Odometry {
     double d_theta = delta_local.z();
 
     // ロボット座標系からフィールド座標系へ座標変換(中点法を使用)
-    position_.x() = delta_x * cos(position_.z() + d_theta / 2) -
-                    delta_y * sin(position_.z() + d_theta / 2);
-    position_.y() = delta_x * sin(position_.z() + d_theta / 2) +
-                    delta_y * cos(position_.z() + d_theta / 2);
+    position_.x() += delta_x * cos(position_.z() + d_theta / 2) -
+                     delta_y * sin(position_.z() + d_theta / 2);
+    position_.y() += delta_x * sin(position_.z() + d_theta / 2) +
+                     delta_y * cos(position_.z() + d_theta / 2);
     position_.z() += d_theta;
 
     position_.z() = normalize_angle(position_.z());
