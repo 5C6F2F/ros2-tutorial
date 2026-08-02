@@ -6,6 +6,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <tf2/utils.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <tf2_ros/transform_broadcaster.hpp>
 #include <tutorial_interfaces/msg/encoder_counts.hpp>
 
 #include "odometry.hpp"
@@ -85,6 +86,8 @@ class EncoderLocalizationNode : public rclcpp::Node {
     encoder_pose_pub_ = this->create_publisher<nav_msgs::msg::Odometry>(
         TopicName::ENCODER_POSE, 10);
 
+    tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
+
     RCLCPP_INFO(this->get_logger(), "Odometry Node has started.");
   }
 
@@ -95,6 +98,7 @@ class EncoderLocalizationNode : public rclcpp::Node {
   std::unique_ptr<Odometry<N>> odometry_;
   rclcpp::Subscription<EncoderCounts>::SharedPtr encoder_counts_sub_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr encoder_pose_pub_;
+  std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
   void callback(const EncoderCounts::ConstSharedPtr msg) {
     std::array<int, N> encoder_counts = {
@@ -130,6 +134,24 @@ class EncoderLocalizationNode : public rclcpp::Node {
     odom_msg.twist = twist;
 
     encoder_pose_pub_->publish(odom_msg);
+
+    tf2::Transform odom_tf;
+    odom_tf.setOrigin(
+        tf2::Vector3(pose.pose.position.x, pose.pose.position.y, 0.0));
+    tf2::Quaternion q_odom(pose.pose.orientation.x, pose.pose.orientation.y,
+                           pose.pose.orientation.z, pose.pose.orientation.w);
+    odom_tf.setRotation(q_odom);
+
+    geometry_msgs::msg::TransformStamped tf;
+    tf.header.stamp = current_time;
+    tf.header.frame_id = "odom";
+    tf.child_frame_id = "base_link";
+    tf.transform.translation.x = odom_tf.getOrigin().x();
+    tf.transform.translation.y = odom_tf.getOrigin().y();
+    tf.transform.translation.z = odom_tf.getOrigin().z();
+    tf.transform.rotation = tf2::toMsg(odom_tf.getRotation());
+
+    tf_broadcaster_->sendTransform(tf);
   }
 };
 
