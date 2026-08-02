@@ -3,51 +3,17 @@
 #include <Eigen/Dense>
 #include <array>
 #include <geometry_msgs/msg/twist.hpp>
+#include <rclcpp/logging.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <tutorial_interfaces/msg/encoder_counts.hpp>
 
-#include "wheel_config.hpp"
-
-using namespace units::literals;
+using namespace units::length;
 using EncoderCounts = tutorial_interfaces::msg::EncoderCounts;
 using Twist = geometry_msgs::msg::Twist;
 
 // 測定輪の個数
 constexpr int N = 3;
-constexpr int ENCODER_RESOLUTION = 4096;
-
-// 車輪のパラメーター
-// 単位はmm
-constexpr double SQRT_3 = 1.73205080757;
-constexpr millimeter_t TREAD_RADIUS = 186.5_mm;
-constexpr millimeter_t WHEEL_RADIUS = 30_mm;
-
-// Front
-constexpr millimeter_t front_x = TREAD_RADIUS;
-constexpr millimeter_t front_y = 0_mm;
-constexpr radian_t front_theta = 90_deg;
-constexpr millimeter_t front_radius = WHEEL_RADIUS;
-
-// Rear Left
-constexpr millimeter_t rear_left_x = -TREAD_RADIUS / 2.0;
-constexpr millimeter_t rear_left_y = TREAD_RADIUS * SQRT_3 / 2.0;
-constexpr radian_t rear_left_theta = 90_deg + 120_deg;
-constexpr millimeter_t rear_left_radius = WHEEL_RADIUS;
-;
-
-// Rear Right
-constexpr millimeter_t rear_right_x = -TREAD_RADIUS / 2.0;
-constexpr millimeter_t rear_right_y = -TREAD_RADIUS * SQRT_3 / 2.0;
-constexpr radian_t rear_right_theta = 90_deg + 240_deg;
-constexpr millimeter_t rear_right_radius = WHEEL_RADIUS;
-
-constexpr std::array<WheelConfig, N> WHEEL_CONFIGS = {
-    WheelConfig{front_x, front_y, front_theta, front_radius},
-    WheelConfig{rear_left_x, rear_left_y, rear_left_theta, rear_left_radius},
-    WheelConfig{rear_right_x, rear_right_y, rear_right_theta,
-                rear_right_radius}};
-
-constexpr int FREQUENCY = 30;
+constexpr int CONFIG_SIZE_PER_WHEEL = 4;
 
 namespace NodeName {
 constexpr char CMD_VEL_TO_ENCODER[] = "cmd_vel_to_encoder";
@@ -58,27 +24,57 @@ constexpr char CMD_VEL[] = "/cmd_vel";
 constexpr char ENCODER_COUNTS[] = "/encoder_counts";
 }  // namespace TopicName
 
+namespace Parameters {
+constexpr char ENCODER_RESOLUTION[] = "encoder_resolution";
+constexpr char WHEEL_CONFIGS[] = "wheel_configs";
+constexpr char FREQUENCY[] = "frequency";
+}  // namespace Parameters
+
 class CmdVelToEncoderNode : public rclcpp::Node {
  public:
   CmdVelToEncoderNode()
       : Node(NodeName::CMD_VEL_TO_ENCODER), vx_(0.0), vy_(0.0), omega_(0.0) {
-    encoder_resolution_ = ENCODER_RESOLUTION;
+    this->declare_parameter(Parameters::ENCODER_RESOLUTION, 4096);
+    encoder_resolution_ =
+        this->get_parameter(Parameters::ENCODER_RESOLUTION).as_int();
+
+    this->declare_parameter(Parameters::WHEEL_CONFIGS, std::vector<double>());
+    std::vector<double> config_vector =
+        this->get_parameter(Parameters::WHEEL_CONFIGS).as_double_array();
+
+    // パラメータの要素数が合わない場合は強制終了(必要な要素数は4N)
+    if (config_vector.size() != N * CONFIG_SIZE_PER_WHEEL) {
+      RCLCPP_ERROR(this->get_logger(),
+                   "Invalid wheel config size! expected: %d, actual: %zu",
+                   N * CONFIG_SIZE_PER_WHEEL, config_vector.size());
+      exit(1);
+    }
 
     for (int i = 0; i < N; i++) {
-      double x = WHEEL_CONFIGS[i].x.value();
-      double y = WHEEL_CONFIGS[i].y.value();
-      double theta = WHEEL_CONFIGS[i].theta.value();
-      double radius = WHEEL_CONFIGS[i].radius.value();
+      int base_i = i * CONFIG_SIZE_PER_WHEEL;
+      meter_t x = millimeter_t(config_vector[base_i + 0]);
+      meter_t y = millimeter_t(config_vector[base_i + 1]);
+      double theta = config_vector[base_i + 2];
+      meter_t radius = millimeter_t(config_vector[base_i + 3]);
 
       wheel_matrix_(i, 0) = std::cos(theta);
       wheel_matrix_(i, 1) = std::sin(theta);
-      wheel_matrix_(i, 2) = x * wheel_matrix_(i, 1) - y * wheel_matrix_(i, 0);
+      wheel_matrix_(i, 2) =
+          x.value() * wheel_matrix_(i, 1) - y.value() * wheel_matrix_(i, 0);
 
-      double wheel_circumference = 2.0 * M_PI * radius;
+      double wheel_circumference = 2.0 * M_PI * radius.value();
       wheel_matrix_.row(i) /= wheel_circumference;
     }
 
-    dt_ = 1.0 / FREQUENCY;
+    this->declare_parameter(Parameters::FREQUENCY, 30);
+    const int frequency = this->get_parameter(Parameters::FREQUENCY).as_int();
+    if (frequency <= 0) {
+      RCLCPP_ERROR(this->get_logger(),
+                   "Invalid frequency parameter! expected > 0, actual: %d",
+                   frequency);
+      exit(1);
+    }
+    dt_ = 1.0 / frequency;
 
     // エンコーダカウントを初期化
     encoder_counts_.fill(0);

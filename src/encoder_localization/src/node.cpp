@@ -17,40 +17,7 @@ using EncoderCounts = tutorial_interfaces::msg::EncoderCounts;
 
 // 測定輪の個数
 constexpr int N = 3;
-constexpr int ENCODER_RESOLUTION = 4096;
-
-// 車輪のパラメーター
-// 単位はmm
-constexpr double SQRT_3 = 1.73205080757;
-constexpr millimeter_t TREAD_RADIUS = 186.5_mm;
-constexpr millimeter_t WHEEL_RADIUS = 30_mm;
-
-// Front
-constexpr millimeter_t front_x = TREAD_RADIUS;
-constexpr millimeter_t front_y = 0_mm;
-constexpr radian_t front_theta = 90_deg;
-constexpr millimeter_t front_radius = WHEEL_RADIUS;
-
-// Rear Left
-constexpr millimeter_t rear_left_x = -TREAD_RADIUS / 2.0;
-constexpr millimeter_t rear_left_y = TREAD_RADIUS * SQRT_3 / 2.0;
-constexpr radian_t rear_left_theta = 90_deg + 120_deg;
-constexpr millimeter_t rear_left_radius = WHEEL_RADIUS;
-;
-
-// Rear Right
-constexpr millimeter_t rear_right_x = -TREAD_RADIUS / 2.0;
-constexpr millimeter_t rear_right_y = -TREAD_RADIUS * SQRT_3 / 2.0;
-constexpr radian_t rear_right_theta = 90_deg + 240_deg;
-constexpr millimeter_t rear_right_radius = WHEEL_RADIUS;
-
-constexpr std::array<WheelConfig, N> WHEEL_CONFIGS = {
-    WheelConfig{front_x, front_y, front_theta, front_radius},
-    WheelConfig{rear_left_x, rear_left_y, rear_left_theta, rear_left_radius},
-    WheelConfig{rear_right_x, rear_right_y, rear_right_theta,
-                rear_right_radius}};
-
-constexpr int FREQUENCY = 30;
+constexpr int CONFIG_SIZE_PER_WHEEL = 4;
 
 namespace NodeName {
 constexpr char ENCODER_LOCALIZATION[] = "encoder_localization";
@@ -61,21 +28,54 @@ constexpr char ENCODER_POSE[] = "/encoder_pose";
 constexpr char ENCODER_COUNTS[] = "/encoder_counts";
 }  // namespace TopicName
 
+namespace Parameters {
+constexpr char ENCODER_RESOLUTION[] = "encoder_resolution";
+constexpr char WHEEL_CONFIGS[] = "wheel_configs";
+constexpr char FREQUENCY[] = "frequency";
+}  // namespace Parameters
+
 class EncoderLocalizationNode : public rclcpp::Node {
  public:
   EncoderLocalizationNode() : Node(NodeName::ENCODER_LOCALIZATION) {
     last_time_ = this->get_clock()->now();
 
-    odometry_ =
-        std::make_unique<Odometry<N>>(WHEEL_CONFIGS, ENCODER_RESOLUTION);
+    this->declare_parameter(Parameters::ENCODER_RESOLUTION, 4096);
+    int encoder_resolution =
+        this->get_parameter(Parameters::ENCODER_RESOLUTION).as_int();
 
-    if (FREQUENCY <= 0) {
+    this->declare_parameter(Parameters::WHEEL_CONFIGS, std::vector<double>());
+    std::vector<double> config_vector =
+        this->get_parameter(Parameters::WHEEL_CONFIGS).as_double_array();
+
+    // パラメータの要素数が合わない場合は強制終了(必要な要素数は4N)
+    if (config_vector.size() != N * CONFIG_SIZE_PER_WHEEL) {
       RCLCPP_ERROR(this->get_logger(),
-                   "Invalid frequency parameter! expected > 0, actual: %d",
-                   FREQUENCY);
+                   "Invalid wheel config size! expected: %d, actual: %zu",
+                   N * CONFIG_SIZE_PER_WHEEL, config_vector.size());
       exit(1);
     }
-    min_dt_ = 1.0 / static_cast<double>(FREQUENCY);
+
+    std::array<WheelConfig, N> wheel_configs;
+    for (int i = 0; i < N; i++) {
+      int base_i = i * CONFIG_SIZE_PER_WHEEL;
+      wheel_configs[i].x = millimeter_t(config_vector[base_i + 0]);
+      wheel_configs[i].y = millimeter_t(config_vector[base_i + 1]);
+      wheel_configs[i].theta = radian_t(config_vector[base_i + 2]);
+      wheel_configs[i].radius = millimeter_t(config_vector[base_i + 3]);
+    }
+
+    odometry_ =
+        std::make_unique<Odometry<N>>(wheel_configs, encoder_resolution);
+
+    this->declare_parameter(Parameters::FREQUENCY, 30);
+    const int frequency = this->get_parameter(Parameters::FREQUENCY).as_int();
+    if (frequency <= 0) {
+      RCLCPP_ERROR(this->get_logger(),
+                   "Invalid frequency parameter! expected > 0, actual: %d",
+                   frequency);
+      exit(1);
+    }
+    min_dt_ = 1.0 / static_cast<double>(frequency);
 
     encoder_counts_sub_ = this->create_subscription<EncoderCounts>(
         TopicName::ENCODER_COUNTS, 10,
