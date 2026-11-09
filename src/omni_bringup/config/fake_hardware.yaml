@@ -6,7 +6,7 @@ fake_mcu:
     slip_wheel_bias: [1.0, 0.6, 1.4]
     slip_noise_std: 0.0
     publish_base_link_true: false
-    ground_truth_frame: odom       # 発展編では map にする
+    base_link_true_parent_frame: odom   # 発展編では map にする
     drop_ratio: 0.0                # encoder_countsを送らない割合
     enable_imu: false
     imu_frame: base_link
