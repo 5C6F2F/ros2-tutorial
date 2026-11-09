@@ -1,0 +1,7 @@
+Diagnostics:
+  UnusedIncludes: Strict
+  Includes:
+    # ROS2 のまとめてincludeする用のヘッダーは unused-includes の対象外にする
+    IgnoreHeader:
+      - rclcpp/rclcpp.hpp
+      - rclcpp_action/rclcpp_action.hpp
