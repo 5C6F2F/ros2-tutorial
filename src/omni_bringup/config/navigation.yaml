@@ -1,0 +1,26 @@
+/**:
+  ros__parameters:
+    global_frame: odom         # 発展編では map にする
+    base_frame: base_link
+
+path_generator:
+  ros__parameters:
+    waypoint_spacing: 0.05     # [m]
+    angular_spacing: 0.10      # [rad]
+
+path_follower:
+  ros__parameters:
+    control_rate: 50.0         # [Hz]
+    feedback_rate: 10.0        # [Hz]
+    lookahead_distance: 0.30   # [m]
+    max_linear_speed: 0.50     # [m/s]
+    max_angular_speed: 1.00    # [rad/s]
+    position_gain: 1.5         # [1/s]
+    yaw_gain: 2.0              # [1/s]
+    position_tolerance: 0.02   # [m]
+    yaw_tolerance: 0.035       # [rad]
+    tf_timeout: 0.5            # [s]
+
+navigation_manager:
+  ros__parameters:
+    planning_timeout: 1.0      # [s]

@@ -1,0 +1,17 @@
+# 9章: 測定輪、IMU、LiDARをEKFで統合する
+/**:
+  ros__parameters:
+    global_frame: map
+
+fake_mcu:
+  ros__parameters:
+    slip_ratio: 0.03
+    slip_noise_std: 0.01
+    publish_base_link_true: true
+    base_link_true_parent_frame: map
+    enable_imu: true
+
+# odom → base_link はEKFが発行する
+encoder_odometry:
+  ros__parameters:
+    publish_tf: false

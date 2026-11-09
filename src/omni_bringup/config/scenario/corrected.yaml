@@ -1,0 +1,11 @@
+# 8章: 測定輪を滑らせ、LiDARの絶対位置で map → odom を補正する
+/**:
+  ros__parameters:
+    global_frame: map
+
+fake_mcu:
+  ros__parameters:
+    slip_ratio: 0.03
+    slip_noise_std: 0.01
+    publish_base_link_true: true
+    base_link_true_parent_frame: map

@@ -1,0 +1,7 @@
+# 送信側だけをbest effortにする。受信側はreliableのままなので通信できない
+fake_mcu:
+  ros__parameters:
+    qos_overrides:
+      /encoder_counts:
+        publisher:
+          reliability: best_effort

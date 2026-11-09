@@ -1,0 +1,30 @@
+# 既定のQoS。このファイルを読み込まなくても同じ値になる
+fake_mcu:
+  ros__parameters:
+    qos_overrides:
+      /encoder_counts:
+        publisher:
+          reliability: reliable
+          durability: volatile
+          history: keep_last
+          depth: 10
+
+encoder_odometry:
+  ros__parameters:
+    qos_overrides:
+      /encoder_counts:
+        subscription:
+          reliability: reliable
+          durability: volatile
+          history: keep_last
+          depth: 10
+
+navigation_manager:
+  ros__parameters:
+    qos_overrides:
+      /planned_path:
+        publisher:
+          reliability: reliable
+          durability: volatile
+          history: keep_last
+          depth: 10

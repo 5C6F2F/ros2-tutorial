@@ -1,0 +1,21 @@
+fake_mcu:
+  ros__parameters:
+    publish_rate: 100.0            # [Hz]
+    cmd_vel_timeout: 1.0           # [s]
+    slip_ratio: 0.0
+    slip_wheel_bias: [1.0, 0.6, 1.4]
+    slip_noise_std: 0.0
+    publish_base_link_true: false
+    ground_truth_frame: odom       # 発展編では map にする
+    drop_ratio: 0.0                # encoder_countsを送らない割合
+    enable_imu: false
+    imu_frame: base_link
+    imu_gyro_noise_std: 0.01       # [rad/s]
+
+fake_lidar_localizer:
+  ros__parameters:
+    map_frame: map
+    lidar_rate: 5.0                  # [Hz]
+    lidar_latency: 0.10              # [s] 計測から結果が届くまでの遅れ
+    lidar_position_noise_std: 0.02   # [m]
+    lidar_yaw_noise_std: 0.02        # [rad]

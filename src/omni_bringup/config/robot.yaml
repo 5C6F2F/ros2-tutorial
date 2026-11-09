@@ -1,0 +1,6 @@
+# 複数のノードで共有する機体定数
+/**:
+  ros__parameters:
+    wheel_radius: 0.025    # [m]
+    base_radius: 0.150     # [m] 機体中心から測定輪までの距離
+    counts_per_rev: 8192   # [count/rev] 2048 PPRの4逓倍
