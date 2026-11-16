@@ -22,13 +22,27 @@ class FakeLidarLocalizer : public rclcpp::Node {
   FakeLidarLocalizer()
       : Node("fake_lidar_localizer"),
         tf_buffer_(get_clock()),
-        tf_listener_(tf_buffer_),
-        random_engine_(std::random_device{}()) {
+        tf_listener_(tf_buffer_) {
+    // 起動時にだけ読むパラメータ。ros2 param set では変更できない
+    rcl_interfaces::msg::ParameterDescriptor read_only;
+    read_only.read_only = true;
+    // 周期は0にできないので、範囲も指定する
+    rcl_interfaces::msg::ParameterDescriptor rate_descriptor = read_only;
+    rate_descriptor.floating_point_range.resize(1);
+    rate_descriptor.floating_point_range[0].from_value = 0.1;
+    rate_descriptor.floating_point_range[0].to_value = 100.0;
+
     declare_parameter("map_frame", "map");
-    declare_parameter("lidar_rate", 5.0);
+    declare_parameter("lidar_rate", 5.0, rate_descriptor);
     declare_parameter("lidar_latency", 0.10);
     declare_parameter("lidar_position_noise_std", 0.02);
     declare_parameter("lidar_yaw_noise_std", 0.02);
+    // 0なら起動ごとに異なる乱数を使う
+    declare_parameter("random_seed", 0, read_only);
+
+    const int64_t seed = get_parameter("random_seed").as_int();
+    random_engine_.seed(seed != 0 ? static_cast<std::mt19937::result_type>(seed)
+                                  : std::random_device{}());
 
     pose_pub_ = create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
         "lidar_pose", 10);

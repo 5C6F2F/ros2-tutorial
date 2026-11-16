@@ -11,6 +11,7 @@ fake_mcu:
     enable_imu: false
     imu_frame: base_link
     imu_gyro_noise_std: 0.01       # [rad/s]
+    random_seed: 1                 # 0にすると起動ごとに異なる乱数になる
 
 fake_lidar_localizer:
   ros__parameters:
@@ -19,3 +20,4 @@ fake_lidar_localizer:
     lidar_latency: 0.10              # [s] 計測から結果が届くまでの遅れ
     lidar_position_noise_std: 0.02   # [m]
     lidar_yaw_noise_std: 0.02        # [rad]
+    random_seed: 2                   # 0にすると起動ごとに異なる乱数になる

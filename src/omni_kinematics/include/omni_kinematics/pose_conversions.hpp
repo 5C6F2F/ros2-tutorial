@@ -2,37 +2,33 @@
 
 #pragma once
 
-#include <cmath>
-
 #include "geometry_msgs/msg/pose.hpp"
 #include "geometry_msgs/msg/quaternion.hpp"
 #include "geometry_msgs/msg/transform.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "omni_kinematics/omni_kinematics.hpp"
+#include "tf2/LinearMath/Quaternion.hpp"
+#include "tf2/utils.hpp"
+#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 
 namespace omni_kinematics {
 
-inline double yaw_from_quaternion(const geometry_msgs::msg::Quaternion& q) {
-  return std::atan2(2.0 * (q.w * q.z + q.x * q.y),
-                    1.0 - 2.0 * (q.y * q.y + q.z * q.z));
-}
-
 inline Pose2D to_pose2d(const geometry_msgs::msg::Pose& pose) {
   return Pose2D{pose.position.x, pose.position.y,
-                yaw_from_quaternion(pose.orientation)};
+                tf2::getYaw(pose.orientation)};
 }
 
 inline Pose2D to_pose2d(const geometry_msgs::msg::TransformStamped& transform) {
   return Pose2D{transform.transform.translation.x,
                 transform.transform.translation.y,
-                yaw_from_quaternion(transform.transform.rotation)};
+                tf2::getYaw(transform.transform.rotation)};
 }
 
+// z軸まわりにyawだけ回転したクォータニオン
 inline geometry_msgs::msg::Quaternion to_quaternion(const double yaw) {
-  geometry_msgs::msg::Quaternion q;
-  q.z = std::sin(yaw / 2.0);
-  q.w = std::cos(yaw / 2.0);
-  return q;
+  tf2::Quaternion q;
+  q.setRPY(0.0, 0.0, yaw);
+  return tf2::toMsg(q);
 }
 
 inline geometry_msgs::msg::Pose to_pose_msg(const Pose2D& pose) {

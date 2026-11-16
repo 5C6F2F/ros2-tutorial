@@ -13,13 +13,14 @@
 #include "omni_msgs/srv/generate_path.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
+#include "tf2/exceptions.hpp"
 #include "tf2_ros/buffer.hpp"
 #include "tf2_ros/transform_listener.hpp"
 
 using geometry_msgs::msg::PoseStamped;
 using omni_msgs::action::FollowPath;
 using omni_msgs::srv::GeneratePath;
-using GoalHandle = rclcpp_action::ClientGoalHandle<FollowPath>;
+using ClientGoalHandle = rclcpp_action::ClientGoalHandle<FollowPath>;
 
 enum class State { IDLE, PLANNING, FOLLOWING, CANCELING };
 
@@ -56,8 +57,7 @@ class NavigationManager : public rclcpp::Node {
     path_pub_ = create_publisher<nav_msgs::msg::Path>(
         "planned_path", rclcpp::QoS(10), path_options);
     goal_sub_ = create_subscription<PoseStamped>(
-        "goal_pose", 10,
-        [this](const PoseStamped::ConstSharedPtr msg) { on_goal_pose(*msg); });
+        "goal_pose", 10, [this](const PoseStamped& msg) { on_goal_pose(msg); });
     path_client_ = create_client<GeneratePath>("generate_path");
     follow_client_ =
         rclcpp_action::create_client<FollowPath>(this, "follow_path");
@@ -162,23 +162,31 @@ class NavigationManager : public rclcpp::Node {
     follow_goal.path = response.path;
     rclcpp_action::Client<FollowPath>::SendGoalOptions options;
     options.goal_response_callback =
-        [this](const GoalHandle::SharedPtr goal_handle) {
+        [this](const ClientGoalHandle::SharedPtr goal_handle) {
           on_goal_response(goal_handle);
         };
     options.feedback_callback =
-        [this](GoalHandle::SharedPtr,
+        [this](ClientGoalHandle::SharedPtr,
                const std::shared_ptr<const FollowPath::Feedback> feedback) {
           RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
                                "ゴールまで %.2f m", feedback->distance_to_goal);
         };
-    options.result_callback = [this](const GoalHandle::WrappedResult& result) {
-      on_follow_result(result);
-    };
+    options.result_callback =
+        [this](const ClientGoalHandle::WrappedResult& result) {
+          on_follow_result(result);
+        };
     set_state(State::FOLLOWING);
     follow_client_->async_send_goal(follow_goal, options);
   }
 
-  void on_goal_response(const GoalHandle::SharedPtr goal_handle) {
+  void on_goal_response(const ClientGoalHandle::SharedPtr goal_handle) {
+    // ウォッチドッグが先に状態を進めていた場合、届いたのは古いGoalの応答
+    if (state_ != State::FOLLOWING || goal_handle_) {
+      if (goal_handle) {
+        follow_client_->async_cancel_goal(goal_handle);
+      }
+      return;
+    }
     if (!goal_handle) {
       RCLCPP_ERROR(get_logger(), "経路追従のGoalが拒否されました");
       resume_or_idle();
@@ -200,7 +208,11 @@ class NavigationManager : public rclcpp::Node {
     follow_client_->async_cancel_goal(goal_handle_);
   }
 
-  void on_follow_result(const GoalHandle::WrappedResult& result) {
+  void on_follow_result(const ClientGoalHandle::WrappedResult& result) {
+    // 古いGoalの結果は無視する
+    if (!goal_handle_ || result.goal_id != goal_handle_->get_goal_id()) {
+      return;
+    }
     goal_handle_.reset();
     switch (result.code) {
       case rclcpp_action::ResultCode::SUCCEEDED:
@@ -251,7 +263,7 @@ class NavigationManager : public rclcpp::Node {
   State state_{State::IDLE};
   rclcpp::Time planning_start_time_;
   std::optional<PoseStamped> latest_goal_;
-  GoalHandle::SharedPtr goal_handle_;
+  ClientGoalHandle::SharedPtr goal_handle_;
 };
 
 int main(int argc, char** argv) {

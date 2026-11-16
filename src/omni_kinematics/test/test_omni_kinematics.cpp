@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include "omni_kinematics/omni_kinematics.hpp"
+#include "omni_kinematics/pose_conversions.hpp"
 
 using omni_kinematics::BodyMotion;
 using omni_kinematics::Pose2D;
@@ -65,27 +66,11 @@ TEST(IntegrateMidpoint, WrapsYawIntoPlusMinusPi) {
   EXPECT_NEAR(pose.yaw, 4.0 - 2.0 * M_PI, kTolerance);
 }
 
-TEST(Compose, AppliesParentRotation) {
-  const auto pose = omni_kinematics::compose(Pose2D{1.0, 0.0, M_PI / 2.0},
-                                             Pose2D{1.0, 0.0, 0.5});
-  EXPECT_NEAR(pose.x, 1.0, kTolerance);
-  EXPECT_NEAR(pose.y, 1.0, kTolerance);
-  EXPECT_NEAR(pose.yaw, M_PI / 2.0 + 0.5, kTolerance);
-}
-
-TEST(Inverse, ComposeWithInverseIsIdentity) {
+TEST(PoseConversions, KeepsYawThroughQuaternion) {
   const Pose2D pose{0.7, -1.2, 2.5};
-  const auto identity =
-      omni_kinematics::compose(pose, omni_kinematics::inverse(pose));
-  EXPECT_NEAR(identity.x, 0.0, kTolerance);
-  EXPECT_NEAR(identity.y, 0.0, kTolerance);
-  EXPECT_NEAR(identity.yaw, 0.0, kTolerance);
-}
-
-TEST(Interpolate, TurnsThroughShortestArc) {
-  const auto pose = omni_kinematics::interpolate(Pose2D{0.0, 0.0, 3.0},
-                                                 Pose2D{2.0, 4.0, -3.0}, 0.5);
-  EXPECT_NEAR(pose.x, 1.0, kTolerance);
-  EXPECT_NEAR(pose.y, 2.0, kTolerance);
-  EXPECT_NEAR(std::abs(pose.yaw), M_PI, kTolerance);
+  const Pose2D result =
+      omni_kinematics::to_pose2d(omni_kinematics::to_pose_msg(pose));
+  EXPECT_NEAR(result.x, pose.x, kTolerance);
+  EXPECT_NEAR(result.y, pose.y, kTolerance);
+  EXPECT_NEAR(result.yaw, pose.yaw, kTolerance);
 }

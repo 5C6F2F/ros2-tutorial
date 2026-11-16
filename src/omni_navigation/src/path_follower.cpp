@@ -21,7 +21,7 @@
 #include "tf2_ros/transform_listener.hpp"
 
 using omni_msgs::action::FollowPath;
-using GoalHandle = rclcpp_action::ServerGoalHandle<FollowPath>;
+using ServerGoalHandle = rclcpp_action::ServerGoalHandle<FollowPath>;
 
 class PathFollower : public rclcpp::Node {
  public:
@@ -31,9 +31,16 @@ class PathFollower : public rclcpp::Node {
         tf_listener_(tf_buffer_),
         last_pose_time_(now()),
         last_feedback_time_(now()) {
+    // 周期は起動時にだけ読む。0にできないので範囲も指定する
+    rcl_interfaces::msg::ParameterDescriptor rate_descriptor;
+    rate_descriptor.read_only = true;
+    rate_descriptor.floating_point_range.resize(1);
+    rate_descriptor.floating_point_range[0].from_value = 1.0;
+    rate_descriptor.floating_point_range[0].to_value = 1000.0;
+
     declare_parameter("global_frame", "odom");
     declare_parameter("base_frame", "base_link");
-    declare_parameter("control_rate", 50.0);
+    declare_parameter("control_rate", 50.0, rate_descriptor);
     declare_parameter("feedback_rate", 10.0);
     declare_parameter("lookahead_distance", 0.30);
     declare_parameter("max_linear_speed", 0.50);
@@ -52,10 +59,10 @@ class PathFollower : public rclcpp::Node {
                std::shared_ptr<const FollowPath::Goal> goal) {
           return handle_goal(*goal);
         },
-        [](const std::shared_ptr<GoalHandle>) {
+        [](const std::shared_ptr<ServerGoalHandle>) {
           return rclcpp_action::CancelResponse::ACCEPT;
         },
-        [this](const std::shared_ptr<GoalHandle> goal_handle) {
+        [this](const std::shared_ptr<ServerGoalHandle> goal_handle) {
           handle_accepted(goal_handle);
         });
 
@@ -84,7 +91,7 @@ class PathFollower : public rclcpp::Node {
     return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
   }
 
-  void handle_accepted(const std::shared_ptr<GoalHandle> goal_handle) {
+  void handle_accepted(const std::shared_ptr<ServerGoalHandle> goal_handle) {
     path_.clear();
     for (const auto& pose : goal_handle->get_goal()->path.poses) {
       path_.push_back(omni_kinematics::to_pose2d(pose.pose));
@@ -101,11 +108,9 @@ class PathFollower : public rclcpp::Node {
       return;
     }
     if (goal_handle_->is_canceling()) {
-      finish(
-          [this](const FollowPath::Result::SharedPtr result) {
-            goal_handle_->canceled(result);
-          },
-          false);
+      stop_robot();
+      goal_handle_->canceled(make_result(false));
+      goal_handle_.reset();
       RCLCPP_INFO(get_logger(), "キャンセルしました");
       return;
     }
@@ -113,16 +118,14 @@ class PathFollower : public rclcpp::Node {
     update_pose();
     if ((now() - last_pose_time_).seconds() >
         get_parameter("tf_timeout").as_double()) {
-      finish(
-          [this](const FollowPath::Result::SharedPtr result) {
-            goal_handle_->abort(result);
-          },
-          false);
+      stop_robot();
+      goal_handle_->abort(make_result(false));
+      goal_handle_.reset();
       RCLCPP_ERROR(get_logger(), "自己位置を取得できないため中断しました");
       return;
     }
     if (!pose_) {
-      publish_velocity(omni_kinematics::BodyMotion{});
+      stop_robot();
       return;
     }
 
@@ -130,11 +133,9 @@ class PathFollower : public rclcpp::Node {
     const double distance_to_goal =
         omni_navigation::distance_between(*pose_, goal);
     if (reached(goal, distance_to_goal)) {
-      finish(
-          [this](const FollowPath::Result::SharedPtr result) {
-            goal_handle_->succeed(result);
-          },
-          true);
+      stop_robot();
+      goal_handle_->succeed(make_result(true));
+      goal_handle_.reset();
       RCLCPP_INFO(get_logger(), "ゴールに到達しました");
       return;
     }
@@ -150,8 +151,7 @@ class PathFollower : public rclcpp::Node {
           get_parameter("global_frame").as_string(),
           get_parameter("base_frame").as_string(), tf2::TimePointZero);
       // TFの発行が止まると、バッファには古い値が残り続ける。時刻で鮮度を判断する
-      const rclcpp::Time stamp(transform.header.stamp,
-                               get_clock()->get_clock_type());
+      const rclcpp::Time stamp(transform.header.stamp);
       if (stamp > last_pose_time_) {
         last_pose_time_ = stamp;
       }
@@ -205,14 +205,13 @@ class PathFollower : public rclcpp::Node {
     goal_handle_->publish_feedback(feedback);
   }
 
-  // 機体を止めてからGoalを終了状態へ移す
-  template <typename EndGoal>
-  void finish(EndGoal end_goal, const bool success) {
-    publish_velocity(omni_kinematics::BodyMotion{});
+  // 速度0の指令を出して機体を止める
+  void stop_robot() { publish_velocity(omni_kinematics::BodyMotion{}); }
+
+  static FollowPath::Result::SharedPtr make_result(const bool success) {
     auto result = std::make_shared<FollowPath::Result>();
     result->success = success;
-    end_goal(result);
-    goal_handle_.reset();
+    return result;
   }
 
   tf2_ros::Buffer tf_buffer_;
@@ -221,7 +220,7 @@ class PathFollower : public rclcpp::Node {
   rclcpp_action::Server<FollowPath>::SharedPtr action_server_;
   rclcpp::TimerBase::SharedPtr control_timer_;
 
-  std::shared_ptr<GoalHandle> goal_handle_;
+  std::shared_ptr<ServerGoalHandle> goal_handle_;
   std::vector<omni_kinematics::Pose2D> path_;
   std::size_t nearest_index_{0};
   std::optional<omni_kinematics::Pose2D> pose_;

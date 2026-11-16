@@ -61,31 +61,4 @@ inline Pose2D integrate_midpoint(const Pose2D& pose, const BodyMotion& delta) {
                 std::remainder(pose.yaw + delta.yaw, 2.0 * M_PI)};
 }
 
-// 姿勢の合成: aの座標系から見たbを、aの親の座標系で表す
-inline Pose2D compose(const Pose2D& a, const Pose2D& b) {
-  const double cos_yaw = std::cos(a.yaw);
-  const double sin_yaw = std::sin(a.yaw);
-  return Pose2D{a.x + cos_yaw * b.x - sin_yaw * b.y,
-                a.y + sin_yaw * b.x + cos_yaw * b.y,
-                std::remainder(a.yaw + b.yaw, 2.0 * M_PI)};
-}
-
-// 逆変換: 親から見た子の姿勢を、子から見た親の姿勢へ変える
-inline Pose2D inverse(const Pose2D& pose) {
-  const double cos_yaw = std::cos(pose.yaw);
-  const double sin_yaw = std::sin(pose.yaw);
-  return Pose2D{-cos_yaw * pose.x - sin_yaw * pose.y,
-                sin_yaw * pose.x - cos_yaw * pose.y,
-                std::remainder(-pose.yaw, 2.0 * M_PI)};
-}
-
-// aからbへ、割合ratioだけ近づける。角度は近い向きへ回す
-inline Pose2D interpolate(const Pose2D& a, const Pose2D& b,
-                          const double ratio) {
-  return Pose2D{
-      a.x + ratio * (b.x - a.x), a.y + ratio * (b.y - a.y),
-      std::remainder(a.yaw + ratio * std::remainder(b.yaw - a.yaw, 2.0 * M_PI),
-                     2.0 * M_PI)};
-}
-
 }  // namespace omni_kinematics

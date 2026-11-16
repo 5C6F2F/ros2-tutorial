@@ -5,11 +5,13 @@
 #include <cmath>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <vector>
 
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "omni_kinematics/omni_kinematics.hpp"
+#include "omni_kinematics/pose_conversions.hpp"
 #include "omni_msgs/msg/encoder_counts.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "tf2_ros/transform_broadcaster.hpp"
@@ -17,15 +19,35 @@
 class EncoderOdometry : public rclcpp::Node {
  public:
   EncoderOdometry() : Node("encoder_odometry") {
-    declare_parameter("wheel_radius", 0.025);
-    declare_parameter("base_radius", 0.150);
-    declare_parameter("counts_per_rev", 8192);
+    // 範囲外の値は、起動時もros2 param setでも拒否される。0だとゼロ除算になる
+    rcl_interfaces::msg::ParameterDescriptor length_descriptor;
+    length_descriptor.floating_point_range.resize(1);
+    length_descriptor.floating_point_range[0].from_value = 0.001;
+    length_descriptor.floating_point_range[0].to_value = 2.0;
+    rcl_interfaces::msg::ParameterDescriptor counts_descriptor;
+    counts_descriptor.integer_range.resize(1);
+    counts_descriptor.integer_range[0].from_value = 1;
+    counts_descriptor.integer_range[0].to_value = 1000000;
+    // 起動時にだけ読むパラメータ。ros2 param set では変更できない
+    rcl_interfaces::msg::ParameterDescriptor read_only;
+    read_only.read_only = true;
+
+    declare_parameter("wheel_radius", 0.025, length_descriptor);
+    declare_parameter("base_radius", 0.150, length_descriptor);
+    declare_parameter("counts_per_rev", 8192, counts_descriptor);
     declare_parameter("odom_frame", "odom");
     declare_parameter("base_frame", "base_link");
     declare_parameter("publish_tf", true);
     // 速度の分散 [vx, vy, vyaw]。EKFが他のセンサーとの重みを決めるのに使う
     declare_parameter("twist_covariance_diagonal",
-                      std::vector<double>{1.0e-4, 1.0e-4, 1.0e-2});
+                      std::vector<double>{1.0e-4, 1.0e-4, 1.0e-2}, read_only);
+
+    twist_variance_ =
+        get_parameter("twist_covariance_diagonal").as_double_array();
+    if (twist_variance_.size() != 3) {
+      throw std::invalid_argument(
+          "twist_covariance_diagonal には3つの値を指定してください");
+    }
 
     odom_pub_ = create_publisher<nav_msgs::msg::Odometry>("odom", 10);
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
@@ -37,8 +59,8 @@ class EncoderOdometry : public rclcpp::Node {
         rclcpp::QosPolicyKind::History, rclcpp::QosPolicyKind::Reliability};
     counts_sub_ = create_subscription<omni_msgs::msg::EncoderCounts>(
         "encoder_counts", rclcpp::QoS(10),
-        [this](const omni_msgs::msg::EncoderCounts::ConstSharedPtr msg) {
-          counts_callback(*msg);
+        [this](const omni_msgs::msg::EncoderCounts& msg) {
+          counts_callback(msg);
         },
         counts_options);
   }
@@ -86,20 +108,15 @@ class EncoderOdometry : public rclcpp::Node {
     odom.header.stamp = stamp;
     odom.header.frame_id = get_parameter("odom_frame").as_string();
     odom.child_frame_id = get_parameter("base_frame").as_string();
-    odom.pose.pose.position.x = pose_.x;
-    odom.pose.pose.position.y = pose_.y;
-    odom.pose.pose.orientation.z = std::sin(pose_.yaw / 2.0);
-    odom.pose.pose.orientation.w = std::cos(pose_.yaw / 2.0);
+    odom.pose.pose = omni_kinematics::to_pose_msg(pose_);
     if (dt > 0.0) {
       odom.twist.twist.linear.x = delta.x / dt;
       odom.twist.twist.linear.y = delta.y / dt;
       odom.twist.twist.angular.z = delta.yaw / dt;
     }
-    const auto variance =
-        get_parameter("twist_covariance_diagonal").as_double_array();
-    odom.twist.covariance[0] = variance.at(0);   // vx
-    odom.twist.covariance[7] = variance.at(1);   // vy
-    odom.twist.covariance[35] = variance.at(2);  // vyaw
+    odom.twist.covariance[0] = twist_variance_[0];   // vx
+    odom.twist.covariance[7] = twist_variance_[1];   // vy
+    odom.twist.covariance[35] = twist_variance_[2];  // vyaw
     odom_pub_->publish(odom);
   }
 
@@ -108,10 +125,7 @@ class EncoderOdometry : public rclcpp::Node {
     transform.header.stamp = stamp;
     transform.header.frame_id = get_parameter("odom_frame").as_string();
     transform.child_frame_id = get_parameter("base_frame").as_string();
-    transform.transform.translation.x = pose_.x;
-    transform.transform.translation.y = pose_.y;
-    transform.transform.rotation.z = std::sin(pose_.yaw / 2.0);
-    transform.transform.rotation.w = std::cos(pose_.yaw / 2.0);
+    transform.transform = omni_kinematics::to_transform_msg(pose_);
     tf_broadcaster_->sendTransform(transform);
   }
 
@@ -121,6 +135,7 @@ class EncoderOdometry : public rclcpp::Node {
 
   std::optional<omni_msgs::msg::EncoderCounts> last_counts_;
   omni_kinematics::Pose2D pose_;
+  std::vector<double> twist_variance_;
 };
 
 int main(int argc, char** argv) {

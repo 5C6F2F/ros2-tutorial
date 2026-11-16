@@ -8,33 +8,80 @@
 #include <cmath>
 #include <memory>
 #include <random>
+#include <stdexcept>
 #include <vector>
 
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "omni_kinematics/omni_kinematics.hpp"
+#include "omni_kinematics/pose_conversions.hpp"
 #include "omni_msgs/msg/encoder_counts.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include "tf2_ros/transform_broadcaster.hpp"
 
+namespace {
+
+// 起動時にだけ読むパラメータ。ros2 param set では変更できない
+rcl_interfaces::msg::ParameterDescriptor read_only_descriptor() {
+  rcl_interfaces::msg::ParameterDescriptor descriptor;
+  descriptor.read_only = true;
+  return descriptor;
+}
+
+// 範囲外の値は、起動時もros2 param setでも拒否される
+rcl_interfaces::msg::ParameterDescriptor range_descriptor(
+    const double from, const double to, const bool read_only = false) {
+  rcl_interfaces::msg::ParameterDescriptor descriptor;
+  descriptor.read_only = read_only;
+  descriptor.floating_point_range.resize(1);
+  descriptor.floating_point_range[0].from_value = from;
+  descriptor.floating_point_range[0].to_value = to;
+  return descriptor;
+}
+
+rcl_interfaces::msg::ParameterDescriptor integer_range_descriptor(
+    const int64_t from, const int64_t to) {
+  rcl_interfaces::msg::ParameterDescriptor descriptor;
+  descriptor.integer_range.resize(1);
+  descriptor.integer_range[0].from_value = from;
+  descriptor.integer_range[0].to_value = to;
+  return descriptor;
+}
+
+}  // namespace
+
 class FakeMcu : public rclcpp::Node {
  public:
-  FakeMcu() : Node("fake_mcu"), random_engine_(std::random_device{}()) {
-    declare_parameter("wheel_radius", 0.025);
-    declare_parameter("base_radius", 0.150);
-    declare_parameter("counts_per_rev", 8192);
-    declare_parameter("publish_rate", 100.0);
+  FakeMcu() : Node("fake_mcu") {
+    declare_parameter("wheel_radius", 0.025, range_descriptor(0.001, 2.0));
+    declare_parameter("base_radius", 0.150, range_descriptor(0.001, 2.0));
+    declare_parameter("counts_per_rev", 8192,
+                      integer_range_descriptor(1, 1000000));
+    declare_parameter("publish_rate", 100.0,
+                      range_descriptor(1.0, 1000.0, true));
     declare_parameter("cmd_vel_timeout", 1.0);
     declare_parameter("slip_ratio", 0.0);
-    declare_parameter("slip_wheel_bias", std::vector<double>{1.0, 0.6, 1.4});
+    declare_parameter("slip_wheel_bias", std::vector<double>{1.0, 0.6, 1.4},
+                      read_only_descriptor());
     declare_parameter("slip_noise_std", 0.0);
     declare_parameter("publish_base_link_true", false);
     declare_parameter("base_link_true_parent_frame", "odom");
     declare_parameter("drop_ratio", 0.0);
-    declare_parameter("enable_imu", false);
+    declare_parameter("enable_imu", false, read_only_descriptor());
     declare_parameter("imu_frame", "base_link");
     declare_parameter("imu_gyro_noise_std", 0.01);
+    // 0なら起動ごとに異なる乱数を使う
+    declare_parameter("random_seed", 0, read_only_descriptor());
+
+    slip_wheel_bias_ = get_parameter("slip_wheel_bias").as_double_array();
+    if (slip_wheel_bias_.size() != 3) {
+      throw std::invalid_argument(
+          "slip_wheel_bias には3つの値を指定してください");
+    }
+    const int64_t seed = get_parameter("random_seed").as_int();
+    random_engine_.seed(seed != 0 ? static_cast<std::mt19937::result_type>(seed)
+                                  : std::random_device{}());
 
     // QoSはYAMLの qos_overrides で起動時に変更できる
     rclcpp::PublisherOptions counts_options;
@@ -47,9 +94,8 @@ class FakeMcu : public rclcpp::Node {
       imu_pub_ = create_publisher<sensor_msgs::msg::Imu>("imu/data", 10);
     }
     cmd_vel_sub_ = create_subscription<geometry_msgs::msg::Twist>(
-        "cmd_vel", 10,
-        [this](const geometry_msgs::msg::Twist::ConstSharedPtr msg) {
-          cmd_vel_ = *msg;
+        "cmd_vel", 10, [this](const geometry_msgs::msg::Twist& msg) {
+          cmd_vel_ = msg;
           last_cmd_vel_time_ = now();
         });
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
@@ -95,11 +141,12 @@ class FakeMcu : public rclcpp::Node {
   void add_wheel_travel(const omni_kinematics::BodyMotion& delta) {
     const double base_radius = get_parameter("base_radius").as_double();
     const auto wheels = omni_kinematics::body_to_wheels(delta, base_radius);
-    const auto bias = get_parameter("slip_wheel_bias").as_double_array();
 
-    wheel_travel_.front += wheels.front * slip_scale(bias.at(0));
-    wheel_travel_.rear_left += wheels.rear_left * slip_scale(bias.at(1));
-    wheel_travel_.rear_right += wheels.rear_right * slip_scale(bias.at(2));
+    wheel_travel_.front += wheels.front * slip_scale(slip_wheel_bias_[0]);
+    wheel_travel_.rear_left +=
+        wheels.rear_left * slip_scale(slip_wheel_bias_[1]);
+    wheel_travel_.rear_right +=
+        wheels.rear_right * slip_scale(slip_wheel_bias_[2]);
   }
 
   // 測定輪が地面に対して滑り、実際より短い距離しか測れない状況を表す
@@ -156,10 +203,7 @@ class FakeMcu : public rclcpp::Node {
     transform.header.frame_id =
         get_parameter("base_link_true_parent_frame").as_string();
     transform.child_frame_id = "base_link_true";
-    transform.transform.translation.x = true_pose_.x;
-    transform.transform.translation.y = true_pose_.y;
-    transform.transform.rotation.z = std::sin(true_pose_.yaw / 2.0);
-    transform.transform.rotation.w = std::cos(true_pose_.yaw / 2.0);
+    transform.transform = omni_kinematics::to_transform_msg(true_pose_);
     tf_broadcaster_->sendTransform(transform);
   }
 
@@ -174,6 +218,7 @@ class FakeMcu : public rclcpp::Node {
   rclcpp::Time last_step_time_;
   omni_kinematics::Pose2D true_pose_;
   omni_kinematics::WheelMotion wheel_travel_;  // 倍精度の累積変位 [m]
+  std::vector<double> slip_wheel_bias_;
 
   std::mt19937 random_engine_;
   std::normal_distribution<double> standard_normal_{0.0, 1.0};
