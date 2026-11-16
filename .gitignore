@@ -3,3 +3,4 @@ ros2_tutorial.code-workspace
 build
 install
 log
+bags/
