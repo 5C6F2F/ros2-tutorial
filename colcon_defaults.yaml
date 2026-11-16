@@ -1,0 +1,5 @@
+# /ros2_tutorial で colcon を実行したときに使う既定の設定
+build:
+  symlink-install: true
+  cmake-args:
+    - -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
