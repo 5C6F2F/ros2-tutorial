@@ -150,7 +150,7 @@ float32 distance_to_goal
 | --- | --- | --- | --- |
 | `odom → base_link` | `encoder_odometry` | `encoder_odometry` | `ekf_local` |
 | `map → odom` | なし | `map_odom_corrector` | `ekf_global` |
-| `ground_truth_frame → base_link_true` | `fake_mcu`(親は `odom`、有効時のみ) | `fake_mcu` | `fake_mcu` |
+| `base_link_true_parent_frame → base_link_true` | `fake_mcu`(親は `odom`、有効時のみ) | `fake_mcu` | `fake_mcu` |
 
 | 項目 | 本編 | 発展編 |
 | --- | --- | --- |
@@ -158,7 +158,7 @@ float32 distance_to_goal
 | `global_frame` | `odom` | `map` |
 | `base_frame` | `base_link` | `base_link` |
 | `publish_base_link_true` | `false` | `true` |
-| `ground_truth_frame` | `odom` | `map` |
+| `base_link_true_parent_frame` | `odom` | `map` |
 | `encoder_odometry.publish_tf` | `true` | 8章は`true`、9章は`false` |
 
 `navigation_manager` は、`goal_pose` のフレームが `global_frame` と異なる場合に警告を出して無視します。開始姿勢はTFの `global_frame → base_frame` から取得します。
@@ -174,11 +174,11 @@ navigation_manager の状態遷移
 | `IDLE` | ゴールを待つ | `goal_pose` 受信 |
 | `PLANNING` | TFから開始姿勢を取得し、`generate_path` を非同期で呼ぶ | Serviceの完了コールバック |
 | `FOLLOWING` | `planned_path` を発行し、`follow_path` のGoalを送る | Actionの結果コールバック |
-| `CANCELING` | 実行中のGoalへキャンセルを要求する | キャンセルの結果コールバック |
+| `CANCELING` | 実行中のGoalへキャンセルを要求する | Actionの結果コールバック |
 
 相手のノードが落ちると応答のコールバックは呼ばれないため、`navigation_manager` は100 msごとに応答を監視します。`generate_path` の応答が `planning_timeout` を超えて届かない場合と、`follow_path` のサーバーが見えなくなった場合は、次のゴールへ進むか `IDLE` へ戻ります。
 
-`path_follower` は、空の経路をGoal受理の段階で拒否します。受理後の終了は次の3種類です。
+`path_follower` は、空の経路、`global_frame` と異なるフレームの経路、走行中に届いた別のGoalを、Goal受理の段階で拒否します。受理後の終了は次の3種類です。
 
 | 終了状態 | `goal_handle` | 条件 |
 | --- | --- | --- |
@@ -222,7 +222,7 @@ v_y &= \frac{2v_f - v_{rl} - v_{rr}}{3} \\
 | `slip_noise_std` | 0.0 | `fake_mcu` | 変位に加える相対ノイズの標準偏差 |
 | `enable_imu` | `false` | `fake_mcu` | `imu/data` を発行するか |
 | `publish_base_link_true` | `false` | `fake_mcu` | `base_link_true` を発行するか |
-| `ground_truth_frame` | `odom` | `fake_mcu` | `base_link_true` の親フレーム |
+| `base_link_true_parent_frame` | `odom` | `fake_mcu` | `base_link_true` の親フレーム |
 | `waypoint_spacing` | 0.05 m | `path_generator` | 経路点の位置間隔 |
 | `angular_spacing` | 0.10 rad | `path_generator` | 経路点の角度間隔 |
 | `control_rate` | 50 Hz | `path_follower` | 速度指令の周期 |
@@ -249,6 +249,13 @@ v_y &= \frac{2v_f - v_{rl} - v_{rr}}{3} \\
 | `twist_covariance_diagonal` | \[1.0e-4, 1.0e-4, 1.0e-2\] | `encoder_odometry` | 速度の分散 \[vx, vy, vyaw\]。EKFの重みになる |
 | `correction_gain` | 0.3 | `map_odom_corrector` | 1回の測定でずれを補正する割合 |
 | `max_measurement_age` | 0.5 s | `map_odom_corrector` | 計測時刻のオドメトリを待つ上限 |
+| `random_seed` | 1(`fake_mcu`)、2(`fake_lidar_localizer`) | `fake_mcu`, `fake_lidar_localizer` | 乱数のシード。0なら起動ごとに変わる |
+| `map_frame` | `map` | `fake_lidar_localizer`, `map_odom_corrector` | 絶対位置の基準フレーム |
+| `odom_frame` | `odom` | `map_odom_corrector` | 補正するオドメトリのフレーム |
+| `base_frame` | `base_link` | `map_odom_corrector` | 機体のフレーム |
+| `publish_rate` | 50 Hz | `map_odom_corrector` | `map → odom` の発行周期 |
+| `global_frame` | `odom` | `path_follower`, `navigation_manager` | 経路と現在姿勢の基準フレーム。発展編では `map` |
+| `base_frame` | `base_link` | `path_follower`, `navigation_manager` | 機体のフレーム |
 
 発展編では `slip_ratio` を0.03、`slip_noise_std` を0.01へ変更します。車輪ごとの係数を変えることで、並進だけでなく姿勢にもドリフトを発生させます。この設定で2 m四方を自動で1周すると、オドメトリ上はゴールに到達しても、真の位置は約0.47 mずれます。
 

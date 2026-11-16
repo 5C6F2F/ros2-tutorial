@@ -8,9 +8,11 @@ Ubuntu 24.04とROS 2 Jazzyで動く教材用ワークスペースです。3輪�
 source /opt/ros/jazzy/setup.bash
 cd ros2_tutorial
 rosdep install --from-paths src --ignore-src -y
-colcon build --symlink-install
+colcon build
 source install/setup.bash
 ```
+
+`colcon build` の設定は `colcon_defaults.yaml` にあります。`--symlink-install` と、エディタの補完に使う `compile_commands.json` の出力を指定しています。この設定は `ros2_tutorial` で `colcon` を実行したときに読み込まれます。
 
 新しいターミナルでは、ROS 2のコマンドを使う前に毎回 `install/setup.bash` を読み込みます。
 
@@ -117,7 +119,7 @@ ros2 launch omni_bringup sim.launch.py
 
 `bringup.launch.py` は、`sim.launch.py` と `navigation.launch.py` をまとめて起動します。同じ引数を指定できます。
 
-パラメータは `omni_bringup/config` のYAMLで変更します。`--symlink-install` でビルドしていれば、再ビルドは不要です。
+パラメータは `omni_bringup/config` のYAMLで変更します。`--symlink-install` でビルドしているので、再ビルドは不要です。
 
 | ファイル | 内容 |
 | --- | --- |
@@ -138,6 +140,8 @@ ros2 param get /fake_mcu wheel_radius
 ros2 param set /encoder_odometry wheel_radius 0.03
 ```
 
+`publish_rate` のように起動時にだけ読むパラメータは読み取り専用で、`ros2 param set` では変更できません。`wheel_radius` などの範囲外の値も拒否されます。
+
 ## bagで走行を再現する
 
 システムを起動した状態で、カウントを記録します。走行が終わったら `Ctrl+C` で止めます。
@@ -153,8 +157,10 @@ ros2 launch omni_bringup sim.launch.py use_fake_mcu:=false use_sim_time:=true
 ```
 
 ```bash
-ros2 bag play bags/run1 --clock 100
+ros2 bag play bags/run1 --clock 100 --delay 1
 ```
+
+`--delay 1` は、再生を1秒待ってから始める指定です。`encoder_odometry` が再生側を見つける前に送られたカウントは届かず、最初に受け取ったカウントが基準になるため、待たないと軌跡の始点がずれます。
 
 `encoder_odometry` は同じカウントから同じ軌跡を計算します。
 
@@ -208,6 +214,8 @@ ros2 param set /fake_mcu slip_noise_std 0.01
 ```
 
 `publish_base_link_true` を `true` にすると、真の姿勢を `odom → base_link_true` のTFとして確認できます。親フレームは `base_link_true_parent_frame` で変更できます。
+
+乱数のシードは `fake_hardware.yaml` の `random_seed` で固定しています。0にすると、起動ごとに異なる乱数になります。
 
 この状態で2 m四方を自動で2周させると、オドメトリ上はゴールに着いていても、真の位置は約0.9 mずれます。
 
@@ -286,7 +294,7 @@ ros2 launch omni_bringup sim.launch.py qos:=mismatch
 ros2 topic info -v /encoder_counts
 ```
 
-送信側が `BEST_EFFORT`、受信側が `RELIABLE` になっています。受信側が再送を求めても、送信側はそれに応えられないため、つながりません。ログにも `incompatible QoS` の警告が出ます。
+送信側が `BEST_EFFORT`、受信側が `RELIABLE` になっています。受信側は `RELIABLE` を要求し、送信側は `BEST_EFFORT` しか提供しないので、接続されません。ログにも `incompatible QoS` の警告が出ます。
 
 ### メッセージが欠けても位置を失わない
 
